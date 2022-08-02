@@ -1,0 +1,326 @@
+---
+title: 'Analysis on Tutoring'
+author: 'Anirudh Dahiya'
+output:
+  html_document:
+    toc: yes
+    toc_depth: 3
+editor_options: 
+  
+  chunk_output_type: console
+---
+
+```{r setup, message=FALSE}
+#loading required packages & libraries
+library(tidyverse)
+library(dplyr)
+library(emmeans)
+library(gridExtra)
+library(Hmisc)
+library(car)
+library(psych)
+options(width=100)
+```
+
+--- 
+
+## Data Dictionary
+
+The following table describes the columns present in the tutoring dataset and the corresponding description elaborating on the kind of data present in each column. 
+
+Variable       | Description
+-------------- | ---------------------------------------------------------
+student_id     | Unique identifier for each student
+tutoring       | Indicates whether the student has been tutored (TRUE) or not (FALSE)
+absences       | Proportion of class time missed 
+score.t1       | Test scores obtained before tutoring scheme
+score.t2       | Test scores obtained after tutoring scheme
+
+---
+
+## Code
+
+```{r Data Understanding & Preparation, message = FALSE}
+#Reading dataset
+tutoring_data <- read_csv("sample_data/tutoring_test_data.csv")
+
+#Checking the structure of the tutoring_data object and it's constituents
+str(tutoring_data)
+
+#From the objective it is clear that the absences, tutoring, score.t1 and score.t2 columns are important for the analysis. The datatypes assigned to these columns appear to be appropriate based on the data they contain.  
+
+#Checking summary statistics of the dataset
+summary(tutoring_data)
+
+#From the summary we notice that only score.t2 column has 1 missing value. We also noticed that score.t2 column  has a max value of 200, which seems to be much larger than the mean. Plotting the data to visualize and understand better. 
+
+#Checking the distribution of the continuous, numeric data columns - absences, score.t1 and score.t2
+ggplot(tutoring_data) + geom_histogram(aes(x=absences), binwidth = 1, fill = "#0099F8") + labs(x="Absences - Proportion of Class Time Missed", y="Frequency", title="Distribution of Absences")
+
+#An outlier is observed, there seems to be a very small portion of students that have missed 100% of class time most of the students have missed between 1% and 20% of class time. But in the context of the objective, it is possible for a student to have missed 100% of class time due to certain circumstances, hence this outlier will be not be addressed. 
+
+ggplot(tutoring_data) + geom_histogram(aes(x=score.t1), binwidth = 1, fill = "#0099F8") + labs(x="Scores Obtained in Test 1", y="Frequency", title="Distribution of Scores Before Tutoring Scheme")
+
+#No outliers can be observed from the visualization.
+
+ggplot(tutoring_data)  + geom_histogram(aes(x=score.t2), binwidth = 1, fill = "#0099F8") + labs(x="Scores Obtained in Test 2", y="Frequency", title="Distribution of Scores After Tutoring Scheme")
+
+#An outlier is observed, once again a small portion of students seemed to have scored a mark of 200. Since the rest of the class have scored between 0 - 100, this appears to be the usual range of marks obtained in a test, hence the outlier will be addressed. 
+
+#Addressing missing data
+subset(tutoring_data, is.na(tutoring_data$score.t2))
+
+#Only 1 student has missing Test 2 score. We cannot assume a student who has a missing Test 2 score received a zero in the test, because it could also be a data entry error or he/she might've missed the exam due to special circumstances. Since it is just 1 student omitting this record from the data will not impact our analysis to a large degree.
+tutoring_data <- na.omit(tutoring_data)
+
+#Addressing outliers
+filter(tutoring_data, score.t2 == 200)
+
+#Only 1 student has a Test 2 score of 200. Since only 1 student has a Test 2 score of 200, this is most likely a case of incorrect data entry. The rest of the students have not scored above 100, thus it is assumed that 100 is the maximum mark. Hence removing this record from the data seems logical and since it is only 1 record it will not affect the statistical analysis significantly. 
+
+tutoring_data <- filter(tutoring_data, score.t2<=100) 
+
+#Checking discrete/categorical data 
+count(tutoring_data, tutoring)
+
+#The count for each category add up to the number of rows in the dataset. 
+```
+
+### Check whether the students allocated to the tutored and non-tutored groups had similar or different average test scores before the tutoring scheme began.
+
+``` {r Question1 Analysis, message = FALSE}
+#Labeling the tutoring column in the dataset with a different column
+tutoring_data <- tutoring_data %>% 
+  mutate(Group=factor(tutoring, levels=c("TRUE", "FALSE"), labels=c("Tutored", "Not Tutored")))
+
+#Summarizing the average score for both groups
+( mean_score_student_groups <- tutoring_data %>% group_by(Group) %>% summarise(Mean_Score = mean(score.t1), Standard_Deviation = sd(score.t1), n = n()) )
+
+#Plotting the average test 1 scores for the two groups of students before the tutoring scheme
+ggplot(tutoring_data, aes(score.t1, ..density..))  + geom_histogram(binwidth = 1)  + geom_density() + facet_grid(Group~.)+ geom_vline(data = mean_score_student_groups, aes(xintercept = Mean_Score), col = "magenta") + geom_label(data = mean_score_student_groups, aes(x = Mean_Score, y = 0, label = round(Mean_Score, digits = 1)), colour = "magenta", size = 3) +
+labs(x="Scores Obtained in Test 1", y="Density", title="Scores of the Tutored and Non-Tutored Students Before Tutoring Scheme", subtitle = "Pink line represents the mean score of students before the tutoring scheme")
+
+#As observed from the above plots there is a difference in average test scores received for each group, although we will now test if the difference is significant or not. In order to perform the next round of statistical analysis, the data should ideally be normally distributed. The plots for both groups show that the data is symmetric around the mean and is normally distributed. 
+
+#NHST Approach - Testing for the null hypothesis (Difference in average test scores for the two groups is zero)
+t.test(score.t1 ~ Group, data = tutoring_data)
+
+#The above t test shows that the difference in average test scores for the two groups is not significantly greater than 0 since the p value > 0.05. T value being small supplements this deduction hence we cannot reject the null hypothesis. (t(197) = 1.04, p = 0.29)
+
+#Plotting the likelihood of distributions of the 2 tutoring groups along with the likelihood of distribution for the null hypothesis
+colours <- scales::hue_pal()(2)
+ggplot(tutoring_data, aes(x=score.t1)) + 
+	geom_histogram(aes(y=..density..,fill=Group), position="identity", alpha=0.5, binwidth=1) +
+	stat_function(fun=function(x) {dnorm(x, mean=mean(tutoring_data$score.t1), sd=sd(tutoring_data$score.t1))}) +
+	stat_function(fun=function(x) {dnorm(x, mean=mean_score_student_groups$Mean_Score[1], sd=mean_score_student_groups$Standard_Deviation[1])}, col=colours[1]) +
+	stat_function(aes(group=Group), fun=function(x) {dnorm(x, mean=mean_score_student_groups$Mean_Score[2], sd=mean_score_student_groups$Standard_Deviation[2])}, col=colours[2]) + 
+	labs(x="Scores Obtained in Test 1", y="Density", fill="Group", title = "Distributions of Alternative Hypothesis vs Null Hypothesis")
+
+#The above plot clearly shows that the likelihood of distribution of the tutored and non tutored groups are similar and are not significantly different from the likelihood of distribution for the null hypothesis. 
+
+#Estimation Approach - estimating the size of the difference in average test scores for the two tutoring groups
+#Creating a linear model object for the two student groups 
+m.scoret1.by.group <- lm(score.t1~Group, data=tutoring_data)
+
+#Estimating the marginal mean Test 1 score for both the student groups along with the confidence intervals for the means of both groups
+(  m.scoret1.by.group.emm <- emmeans(m.scoret1.by.group, ~Group)  )
+
+#Estimated mean Test 1 score for tutoring group - 54.8 95% CI [52.3 - 57.3] and estimated mean Test 1 score for the non tutored group - 52.9 95% CI [50.4 - 55.4]
+
+#Estimating the difference in mean Test 1 scores for the two groups along with the confidence intervals for the difference in means
+(  m.scoret1.by.group.contrast <- confint(pairs(m.scoret1.by.group.emm))  )
+
+#The estimated difference in mean Test 1 scores of the two groups is 1.88 however this difference is not significant. Further we cannot be fully confident about this estimate since 0 is a part of the 95% CI [-1.67 - 5.43]. 
+
+#Plotting the CI for the two groups and the difference in CI
+grid.arrange(
+    ggplot(summary(m.scoret1.by.group.emm), aes(x=Group, y=emmean, ymin=lower.CL, ymax=upper.CL)) + 
+        geom_point() + geom_linerange() + 
+        labs(y="Scores Obtained in Test 1", x="Tutoring Group", subtitle="Error bars are 95% CIs", title="Mean Score Obtained in Test 1"), 
+    ggplot(m.scoret1.by.group.contrast, aes(x=contrast, y=estimate, ymin=lower.CL, ymax=upper.CL)) + 
+        geom_point() + geom_linerange() + 
+        labs(y="Difference in Test 1 scores", x="Contrast", subtitle="Error bars are 95% CIs", title="Difference in Mean Test 1 Scores")  +
+        geom_hline(yintercept=0, lty=2),
+    ncol=2
+)
+
+#The left plot shows that mean score obtained in Test 1 is higher for the tutored group when compared to the non tutored group. The right plot  shows that the difference in mean scores for both the groups is not significantly greater than 0 since 0 is included in the 95% CI [-1.67 - 5.43]. 
+```
+
+### Did the tutored and non-tutored students have similar or different rates of absences on average?
+
+``` {r Question2 Analysis, message = FALSE}
+#Summarizing the average absence for both groups
+( mean_absence_student_groups <- tutoring_data %>% group_by(Group) %>% summarise(Mean_Absence = mean(absences), Standard_Deviation = sd(absences), n = n()) )
+
+#Plotting the average absences for the two tutoring groups 
+ggplot(tutoring_data, aes(absences, ..density..))  + geom_histogram(binwidth = 1) + geom_density() + facet_grid(Group~.)+ geom_vline(data = mean_absence_student_groups, aes(xintercept = Mean_Absence), col = "magenta") + geom_label(data = mean_absence_student_groups, aes(x = Mean_Absence, y = 0, label = round(Mean_Absence, digits = 1)), colour = "magenta", size = 3) +
+labs(x="Proportion of Class Time Missed (Absences)", y="Density", title="Absences of Students from the Tutored & Non Tutored Groups", subtitle = "Pink line represents the mean absence of students")
+
+#As observed from the above plots there is a slight difference in average absences for each group, although we will now test if the difference is significant or not. In order to perform the next round of statistical analysis, the data should ideally be normally distributed. The plots for both groups show that is normally distributed.
+
+#NHST Approach - Testing for the null hypothesis (difference in average absences for both the tutoring groups is 0)
+t.test(absences ~ Group, data = tutoring_data)
+
+#The above t test shows that the difference in average absences for the two tutoring groups is not significantly greater than 0 since p value > 0.05. T value being small supplements this deduction, hence we cannot reject the null hypothesis. (t(198) = 1, p = 0.32)
+
+#Plotting the likelihood distribution of the 2 tutoring groups along with the likelihood distribution of the null hypothesis
+ggplot(tutoring_data, aes(x=absences)) + 
+	geom_histogram(aes(y=..density..,fill=Group), position="identity", alpha=0.5, binwidth=1) +
+	stat_function(fun=function(x) {dnorm(x, mean=mean(tutoring_data$absences), sd=sd(tutoring_data$absences))}) +
+	stat_function(fun=function(x) {dnorm(x, mean=mean_absence_student_groups$Mean_Absence[1], sd=mean_absence_student_groups$Standard_Deviation[1])}, col=colours[1]) +
+	stat_function(aes(group=Group), fun=function(x) {dnorm(x, mean=mean_absence_student_groups$Mean_Absence[2], sd=mean_absence_student_groups$Standard_Deviation[2])}, col=colours[2]) + 
+	labs(x="Proportion of Class Time Missed", y="Density", fill="Group", title = "Distributions of Alternative Hypothesis vs Null Hypothesis")
+
+#The above plot clearly shows that the likelihood distribution of the tutored and non tutored groups are similar and are not significantly different from the likelihood distribution of the null hypothesis. 
+
+#Estimation Approach - estimating the size of the difference in average absences for the two student groups
+#Creating a linear model object for the two student groups 
+m.absence.by.group <- lm(absences~Group, data=tutoring_data)
+
+#Estimating the marginal mean absence for both the student groups along with the confidence intervals for the means of both groups
+(  m.absence.by.group.emm <- emmeans(m.absence.by.group, ~Group)  )
+
+#Estimated mean absence for tutored group - 6.79 95% CI [6.11 - 7.47] and estimated mean absence for non tutored group - 6.31 95% CI [5.63 - 6.99]
+
+#Estimating the difference in mean absence for the two groups along with the confidence intervals for the difference in means
+(  m.absence.by.group.contrast <- confint(pairs(m.absence.by.group.emm))  )
+
+#The estimated difference in mean absences of the two groups is 0.48, however this difference is not significant. Further we cannot be fully confident about this estimate since 0 is included in the 95% CI [-0.481 - 1.44]. 
+
+#Plotting the CI for the two groups and the difference in CI
+grid.arrange(
+    ggplot(summary(m.absence.by.group.emm), aes(x=Group, y=emmean, ymin=lower.CL, ymax=upper.CL)) + 
+        geom_point() + geom_linerange() + 
+        labs(y="Absences", x="Tutoring Group", subtitle="Error bars are 95% CIs", title="Average Absence"), 
+    ggplot(m.absence.by.group.contrast, aes(x=contrast, y=estimate, ymin=lower.CL, ymax=upper.CL)) + 
+        geom_point() + geom_linerange() + 
+        labs(y="Difference in average absences", x="Contrast", subtitle="Error bars are 95% CIs", title="Difference in Average Absence")  +
+        geom_hline(yintercept=0, lty=2),
+    ncol=2
+)
+
+#The left plot shows that mean absence for the tutored group is higher than the mean absence for the non tutored group. The right plot  shows that the difference in mean absences for both the groups is not significantly greater than 0 since 0 lies in the 95% CI [-0.481 - 1.44]. 
+
+```
+
+### Did the tutored students show an increase in their scores compared to the students who did not receive tutoring?
+
+``` {r Question3 Analysis, message = FALSE}
+#Adding a column in the dataset to record change in scores 
+tutoring_data <- tutoring_data %>% mutate(Score_Change = score.t2 - score.t1)
+
+#Summarizing the average change in score for both groups
+( mean_score_change_student_groups <- tutoring_data %>% group_by(Group) %>% summarise(Mean_ScoreChange = mean(Score_Change), Standard_Deviation = sd(Score_Change), n = n()) )
+
+#Testing the effect of the two student groups on the change in scores
+m.scorechange.by.group <- lm(Score_Change~Group, data=tutoring_data)
+anova(m.scorechange.by.group)
+
+#The function anova() tests whether the variable Group has a significant effect on the change in scores. Due to the extremely small p value < 0.05 and the large F values = 25.8 we can be confident that the group to which a student belongs significantly impacts the change in scores. 
+
+#Plotting the average change in scores for the two groups of students 
+ggplot(tutoring_data, aes(Score_Change, ..density..))  + geom_histogram(binwidth = 1)  + geom_density() + facet_grid(Group~.) + geom_vline(data = mean_score_change_student_groups, aes(xintercept = Mean_ScoreChange), col = "magenta") + geom_label(data = mean_score_change_student_groups, aes(x = Mean_ScoreChange, y = 0, label = round(Mean_ScoreChange, digits = 1)), colour = "magenta", size = 3) + labs(x="Change in Score", y="Density", title="Change in Score of Students from the Tutored & Non Tutored Groups", subtitle = "Pink line represents the mean change in score of students")
+
+#As observed from the above plots there is a difference in average change in score for both groups, although we will now test how significant is the effect of tutoring on change in scores. In order to perform the next round of statistical analysis, the data should ideally be normally distributed. The plots for both groups show that is normally distributed.
+
+#NHST Approach - Testing for the null hypothesis (difference in average change in scores for the two tutoring groups is 0)
+t.test(Score_Change ~ Group, data = tutoring_data)
+
+#The above t test shows that the difference in average change in scores for the two groups is  significantly greater than 0 since p value < 0.0001. Hence we can reject the null hypothesis. (t(194) = 5.08, p< 0.0001)
+
+#Plotting the likelihood distribution of the 2 tutoring groups along with what the distribution of the null hypothesis
+ggplot(tutoring_data, aes(x=Score_Change)) + 
+	geom_histogram(aes(y=..density..,fill=Group), position="identity", alpha=0.5, binwidth=1) +
+	stat_function(fun=function(x) {dnorm(x, mean=mean(tutoring_data$Score_Change), sd=sd(tutoring_data$Score_Change))}) +
+	stat_function(fun=function(x) {dnorm(x, mean=mean_score_change_student_groups$Mean_ScoreChange[1], sd=mean_score_change_student_groups$Standard_Deviation[1])}, col=colours[1]) +
+	stat_function(aes(group=Group), fun=function(x) {dnorm(x, mean=mean_score_change_student_groups$Mean_ScoreChange[2], sd=mean_score_change_student_groups$Standard_Deviation[2])}, col=colours[2]) + 
+	labs(x="Change in Scores", y="Density", fill="Group", title = "Distributions of Alternative Hypothesis vs Null Hypothesis")
+
+#The plot clearly shows that the likelihood distributions of the tutored and non tutored groups for change in scores are different and are therefore significantly different from the likelihood distribution of the null hypothesis. 
+
+#Estimation Approach - estimating the size of the difference in average change in scores for the two student groups
+#Estimating the mean change in score for both the student groups along with the confidence intervals for the means of both groups
+(  m.scorechange.by.group.emm <- emmeans(m.scorechange.by.group, ~Group)  )
+
+#Estimated mean change in score for tutoring group - 3.77 95% CI [2.61 - 4.92] and estimated mean change in score for non tutored group - -0.44 95% CI [-1.59 - 0.71]
+
+#Estimating the difference in mean change in score for the two groups along with the confidence intervals for the difference in means
+(  m.scorechange.by.group.contrast <- confint(pairs(m.scorechange.by.group.emm))  )
+
+#The estimated difference in mean change in score of the two tutoring groups is 4.21. We can be confident about this estimate because 0 does not fall within the 95% CI [2.57 - 5.84]. 
+
+#Plotting the CI for the two groups and the difference in CI
+grid.arrange(
+    ggplot(summary(m.scorechange.by.group.emm), aes(x=Group, y=emmean, ymin=lower.CL, ymax=upper.CL)) + 
+        geom_point() + geom_linerange() + 
+        labs(y="Change in Score", x="Tutoring Group", subtitle="Error bars are 95% CIs", title="Average Change in Scores"), 
+    ggplot(m.scorechange.by.group.contrast, aes(x=contrast, y=estimate, ymin=lower.CL, ymax=upper.CL)) + 
+        geom_point() + geom_linerange() + 
+        labs(y="Difference in average change in score", x="Contrast", subtitle="Error bars are 95% CIs", title="Difference in Average Change in Scores")  +
+        geom_hline(yintercept=0, lty=2),
+    ncol=2
+)
+
+#The left plot shows that mean change in score for the tutored group is higher than the mean change in score for the non tutored group. The right plot  shows that the difference in mean change in score for both the groups is significantly greater than 0 since 0 doesn't lie in the 95% CI [2.57 - 5.84]. 
+```
+
+### Was there any effect of absences on the change in scores, and did this have any interaction with the effect of tutoring?
+
+``` {r Question4 Analysis, message = FALSE}
+#Creating a linear model to check if absence has any effect on change in scores
+m.scorechange.by.absence <- lm(Score_Change ~ absences, data = tutoring_data)
+#NHST approach - testing for null hypothesis (slope between absence and change in scores is 0)
+summary(m.scorechange.by.absence)
+
+#By looking into the above summary since the p value > 0.05 for the estimated slope between absence and change in score tells, the relationship between them is not statistically significant. Hence we cannot reject the null hypothesis. (t(198) = -0.59, p = 0.55)
+
+#Estimation approach
+cbind(coefficient=coef(m.scorechange.by.absence), confint(m.scorechange.by.absence))
+
+#By looking into the regression coefficients along with the confidence intervals, we cannot be fully confident about the estimated slope between absence and change in score, since the 0 lies within the 95% CI [-0.32 - 0.17], hence absence isn't a significant predictor of change in score. 
+
+#Creating a linear model to look into the combined effect of absence and tutoring on change in scores. 
+m.scorechange.by.absence.tutoring <- lm(Score_Change ~ absences + Group, data = tutoring_data)
+summary(m.scorechange.by.absence.tutoring)
+
+#The summary of the combined effect of absence and tutoring group shows that only tutoring group is a significant predictor of change in scores since the p value < 0.0001 (t(197) = -5.13, p<0.0001) for the slope between tutoring group and change in score. The p value > 0.05 (t(197) = -0.98, p = 0.32) for absences in the combined model tells us that the estimation of slope between absences and change in scores is not statistically significant. 
+
+summary(m.scorechange.by.group)
+summary(m.scorechange.by.absence)
+
+#When comparing the regression coefficients and p values of absence (slope = -0.11 & p = 0.32) and tutoring group (slope = -4.2 & p<0.0001 (p= 0.000067)) when both are present in the model, compared to when we look into their individual effect of absence (slope = -0.07 & p = 0.55) and tutoring group (slope = -4.2 & p<0.0001 (p = 0.000086)) we notice that the coefficient values have smaller coefficients and bigger p values for both the variables. Beta coefficients are not reliable (changing), thus it is likely that there is some multicollinearity between the variables.  
+
+#Checking if multicollinearity between variable needs action
+vif(m.scorechange.by.absence.tutoring)
+
+#As deduced earlier, the VIF function further demonstrates that there is no multicollinearity between absence and tutoring group since the VIF values for both is below the threshold 5. Now they can be tested for interactivity. 
+
+#Creating a linear model to look into the interactivity between absence and tutoring group
+m.scorechange.by.absence.tutoring.intr <- lm(Score_Change ~ absences * Group, data = tutoring_data)
+summary(m.scorechange.by.absence.tutoring.intr)
+
+#When looking into the above summary of the interaction the beta coefficient for absences:GroupNot Tutored shows us that there is a negative interaction between absences and tutoring group when predicting change in scores. However this is not a significant interaction since the p value > 0.05 (t(196) = -0.143, p = 0.88). 
+
+#Plotting the main effects and interaction effects of both absences and tutoring group
+p1 <- mutate(tutoring_data,
+       main.hat = predict(m.scorechange.by.absence.tutoring, tutoring_data),
+       intr.hat = predict(m.scorechange.by.absence.tutoring.intr, tutoring_data)) %>%
+ggplot() +
+    geom_line(aes(absences, main.hat, colour = Group), size = 1) +
+  labs(x = "Proportion of Class Time Missed (absences)", y = "Prediction (Change In Score)", subtitle = "Main Effects", colour = "Tutoring Group")
+
+p2 <- mutate(tutoring_data,
+       main.hat = predict(m.scorechange.by.absence.tutoring, tutoring_data),
+       intr.hat = predict(m.scorechange.by.absence.tutoring.intr, tutoring_data)) %>%
+  ggplot() +
+    geom_line(aes(absences, intr.hat, colour = Group), size = 1) +
+  labs(x = "Proportion of Class Time Missed (absences)" , y = "Prediction (Change In Score)", subtitle = "Interaction Effects", colour = "Tutoring Group")
+
+grid.arrange(p1, p2)
+
+#From the above plots it can be observed that the slope of lines present in the main effects plot and the interaction effects plot are the same, hence there is no interaction effect between absences & tutoring group. The predicted change in score will be the same for a given proportion of class time missed irrespective of whether a student belongs to the tutored or non tutored group. 
+
+```
+
+---
