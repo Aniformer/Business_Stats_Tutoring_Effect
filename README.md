@@ -1,5 +1,5 @@
-# Business_Stats_Adult_Diet_Plan
-Statistical analysis by examining student scores and quantifying the effect of tutoring schemes on students. Further conducted significance and hypothesis testing to measure the effect and difference between diet plans on adults.  
+# Business_Stats_Tutoring_Effect
+Statistical analysis by examining student scores and quantifying the effect of tutoring schemes on students. Further built regression models to measure the effect of tutoring on student absences and scores. Condcuted hypothesis testing and estimated confidence intervals for tutored and non tutored student groups. 
 
-This analysis was conducting using R in Rstudio and the results were visualized by converting Rmakrdown files to html files for technical and non technical audiences. 
+This analysis was conducting using R in Rstudio and the results were visualized by converting Rmakrdown files to html files. 
 
